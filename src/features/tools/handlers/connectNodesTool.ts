@@ -5,28 +5,38 @@
  * to write Python scripts manually.
  */
 
+import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
-import { handleToolError } from "../../../core/errorHandling.js";
 import { TOOL_NAMES } from "../../../core/constants.js";
-import { getTouchDesignerToolMetadata } from "../metadata/touchDesignerToolMetadata.js";
-import { formatScriptResult } from "../presenter/index.js";
+import { handleToolError } from "../../../core/errorHandling.js";
+import type { ILogger } from "../../../core/logger.js";
 import type { TouchDesignerClient } from "../../../tdClient/touchDesignerClient.js";
+import { formatScriptResult } from "../presenter/index.js";
+import { detailOnlyFormattingSchema } from "../types.js";
 
 // Input schema for connect_nodes tool
-export const connectNodesToolSchema = z.object({
-    sourcePath: z.string().describe("Source node path (e.g., '/project1/noise_tex')"),
-    destinationPath: z.string().describe("Destination node path (e.g., '/project1/blur')"),
-    inputIndex: z.number().int().min(0).default(0).describe("Input index on destination node (default: 0)"),
-    detailLevel: z.enum(["minimal", "summary", "detailed"]).optional().default("summary"),
-    responseFormat: z.enum(["json", "yaml", "markdown"]).optional().default("markdown"),
+const connectNodesToolSchema = detailOnlyFormattingSchema.extend({
+    sourcePath: z.string()
+        .describe("Source node path (e.g., '/project1/noise_tex')"),
+    destinationPath: z.string()
+        .describe("Destination node path (e.g., '/project1/blur')"),
+    inputIndex: z.number()
+        .int()
+        .min(0)
+        .default(0)
+        .describe("Input index on destination node (default: 0)"),
 });
 
-export type ConnectNodesParams = z.infer<typeof connectNodesToolSchema>;
+type ConnectNodesToolParams = z.input<typeof connectNodesToolSchema>;
 
 /**
  * Generate Python script for connecting nodes
  */
-function generateConnectScript(sourcePath: string, destinationPath: string, inputIndex: number): string {
+function generateConnectScript(
+    sourcePath: string,
+    destinationPath: string,
+    _inputIndex: number
+): string {
     return `
 import td
 
@@ -48,14 +58,14 @@ try:
         result = f"SUCCESS: Connected ${src.name} -> {dst.name}"
     else:
         result = f"WARNING: Connection may have failed. Please verify manually."
+        
 except Exception as e:
-    # Provide helpful error message
     error_msg = str(e)
     if "list assignment index out of range" in error_msg:
         raise ValueError(
-            f"Cannot connect ${sourcePath} to ${destinationPath}.\\n"
-            f"The destination node may not have available input ports.\\n"
-            f"Try checking if ${destinationPath} is a TOP/CHOP/SOP that accepts inputs.\\n"
+            f"Cannot connect ${sourcePath} to ${destinationPath}.\\n" +
+            f"The destination node may not have available input ports.\\n" +
+            f"Try checking if ${destinationPath} is a TOP/CHOP/SOP that accepts inputs.\\n" +
             f"Original error: {error_msg}"
         )
     else:
@@ -64,19 +74,35 @@ except Exception as e:
 }
 
 /**
+ * Create a tool result with compatibility notice if present
+ */
+function createToolResult(tdClient: TouchDesignerClient, text: string) {
+    const additionalContent = tdClient.getAdditionalToolResultContents();
+    if (additionalContent) {
+        return {
+            content: [...additionalContent, { text, type: "text" as const }],
+        };
+    }
+    return {
+        content: [{ text, type: "text" as const }],
+    };
+}
+
+/**
  * Register connect_nodes tool handler
  */
 export function registerConnectNodesTool(
-    server: any,
-    logger: any,
+    server: McpServer,
+    logger: ILogger,
     tdClient: TouchDesignerClient
-) {
+): void {
     server.tool(
         TOOL_NAMES.CONNECT_TD_NODES,
-        "Connect two TouchDesigner nodes together using setInputs method. " +
-        "Use this to wire nodes in the TouchDesigner network.",
+        "Connect two TouchDesigner nodes together. " +
+        "Use this to wire nodes in the TouchDesigner network. " +
+        "Example: connect audio_in to noise_tex",
         connectNodesToolSchema.strict().shape,
-        async (params: ConnectNodesParams) => {
+        async (params: ConnectNodesToolParams) => {
             try {
                 const { sourcePath, destinationPath, inputIndex, detailLevel, responseFormat } = params;
                 
@@ -98,14 +124,8 @@ export function registerConnectNodesTool(
                     responseFormat,
                 });
                 
-                return {
-                    content: [
-                        {
-                            text: formattedText,
-                            type: "text",
-                        },
-                    ],
-                };
+                return createToolResult(tdClient, formattedText);
+                
             } catch (error) {
                 return handleToolError(error, logger, TOOL_NAMES.CONNECT_TD_NODES);
             }

@@ -19,6 +19,7 @@ import {
 import type { TouchDesignerClient } from "../../../tdClient/touchDesignerClient.js";
 import type { ToolMetadata } from "../metadata/touchDesignerToolMetadata.js";
 import { getTouchDesignerToolMetadata } from "../metadata/touchDesignerToolMetadata.js";
+import { registerConnectNodesTool } from "./connectNodesTool.js";
 import {
 	formatClassDetails,
 	formatClassList,
@@ -112,6 +113,9 @@ export function registerTdTools(
 	logger: ILogger,
 	tdClient: TouchDesignerClient,
 ): void {
+	// Register connect_nodes tool first
+	registerConnectNodesTool(server, logger, tdClient);
+	
 	const toolMetadataEntries = getTouchDesignerToolMetadata();
 
 	server.tool(
